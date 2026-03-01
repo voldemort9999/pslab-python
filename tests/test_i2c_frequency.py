@@ -155,6 +155,22 @@ class TestFrequencyOnError:
 
         assert master.frequency == original_freq
 
+    def test_frequency_unchanged_on_device_io_error(self, master, mock_device):
+        """If the device raises IOError during configure, frequency stays unchanged."""
+        master.configure(125e3)
+        original_freq = master.frequency
+
+        # Simulate a communication failure.
+        mock_device.send_byte.side_effect = IOError("Simulated I/O failure")
+
+        with pytest.raises(IOError):
+            master.configure(400e3)
+
+        assert master.frequency == original_freq
+
+        # Restore normal behavior for other tests.
+        mock_device.send_byte.side_effect = None
+
 
 # ============================================================
 # Test 6: frequency property is read-only
@@ -214,16 +230,19 @@ class TestBoundaryFrequencies:
         assert master.frequency == pytest.approx(min_freq)
 
     def test_max_valid_frequency(self, master):
-        """Test with a high frequency whose brgval equals MIN_BRGVAL."""
+        """Test with a high frequency whose brgval equals MIN_BRGVAL + 1."""
         # _get_i2c_frequency(MIN_BRGVAL) gives the theoretical max, but due
         # to int() truncation in _get_i2c_brgval, that value may not
-        # round-trip. Instead, find a frequency that computes to MIN_BRGVAL.
+        # round-trip. Instead, find a frequency that computes to MIN_BRGVAL + 1.
         max_brgval_freq = _I2CPrimitive._get_i2c_frequency(
             _I2CPrimitive._MIN_BRGVAL + 1
         )
+        # Verify brgval round-trips correctly.
+        computed_brgval = _I2CPrimitive._get_i2c_brgval(max_brgval_freq)
+        assert computed_brgval == _I2CPrimitive._MIN_BRGVAL + 1
         master.configure(max_brgval_freq)
-        assert master.frequency is not None
-        assert master.frequency > 0
+        roundtrip_freq = _I2CPrimitive._get_i2c_frequency(computed_brgval)
+        assert master.frequency == pytest.approx(roundtrip_freq)
 
     def test_just_below_min_frequency_raises(self, master):
         """Frequency just below minimum should raise ValueError."""
